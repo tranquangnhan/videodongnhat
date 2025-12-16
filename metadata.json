@@ -1,0 +1,5 @@
+{
+  "name": "Veo Script-to-JSON Converter",
+  "description": "A professional tool for analyzing video scripts and converting them into detailed, scene-by-scene JSON specifications for AI video generation.",
+  "requestFramePermissions": []
+}
