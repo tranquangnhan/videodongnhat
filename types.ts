@@ -1,4 +1,3 @@
-
 export interface VeoMetadata {
   project_name: string;
   scene_number: string;
@@ -97,12 +96,3 @@ export type VeoProject = VeoSceneJson[];
 export type VideoStyle = 'single' | 'animation' | 'cinematic' | 'tiktok';
 export type AspectRatio = '16:9' | '9:16' | '21:9' | '4:3';
 export type SceneCount = 1 | 5 | 10 | 15;
-
-export type UserRole = 'admin' | 'user';
-
-export interface UserProfile {
-  uid: string;
-  email: string;
-  role: UserRole;
-  createdAt: number;
-}
