@@ -141,6 +141,9 @@ const PROJECT_SCHEMA: Schema = {
   items: SCENE_SCHEMA,
 };
 
+// Helper function for delay
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export const generateSceneJson = async (
   scriptText: string,
   style: VideoStyle,
@@ -190,26 +193,69 @@ export const generateSceneJson = async (
     5. Tính toán thời gian (start_time, end_time) liên tục.
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: scriptText,
-      config: {
-        systemInstruction: systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: PROJECT_SCHEMA,
-        temperature: 0.3, 
-      },
-    });
+  // Retry logic configuration
+  const MAX_RETRIES = 3;
+  let lastError: any;
 
-    const text = response.text;
-    if (!text) {
-      throw new Error("No response from AI");
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: scriptText,
+        config: {
+          systemInstruction: systemInstruction,
+          responseMimeType: "application/json",
+          responseSchema: PROJECT_SCHEMA,
+          temperature: 0.3, 
+        },
+      });
+
+      const text = response.text;
+      if (!text) {
+        throw new Error("No response from AI");
+      }
+
+      return JSON.parse(text) as VeoProject;
+
+    } catch (error: any) {
+      console.warn(`Gemini API Attempt ${attempt + 1} failed:`, error);
+      lastError = error;
+
+      // Check if error is related to quota/overload (429 Too Many Requests or 503 Service Unavailable)
+      const isOverloaded = 
+        error.message?.includes('429') || 
+        error.status === 429 || 
+        error.message?.includes('quota') ||
+        error.message?.includes('Resource has been exhausted') ||
+        error.status === 503;
+
+      // If it's a transient overload error and we haven't exhausted retries
+      if (isOverloaded && attempt < MAX_RETRIES - 1) {
+        // Exponential backoff: 2s, 4s, 8s
+        const delayTime = 2000 * Math.pow(2, attempt);
+        console.log(`System overloaded. Retrying in ${delayTime}ms...`);
+        await wait(delayTime);
+        continue;
+      }
+
+      // If it's another error type or we ran out of retries, stop loop
+      break;
     }
-
-    return JSON.parse(text) as VeoProject;
-  } catch (error) {
-    console.error("Error generating JSON:", error);
-    throw error;
   }
+
+  // If we reach here, all attempts failed
+  if (lastError) {
+    const isOverloaded = 
+      lastError.message?.includes('429') || 
+      lastError.status === 429 || 
+      lastError.message?.includes('quota') ||
+      lastError.message?.includes('Resource has been exhausted');
+
+    if (isOverloaded) {
+      throw new Error("Hệ thống AI đang quá tải (API Rate Limit). Vui lòng đợi khoảng 1 phút và thử lại.");
+    }
+    throw lastError;
+  }
+
+  throw new Error("Unknown error occurred during generation.");
 };

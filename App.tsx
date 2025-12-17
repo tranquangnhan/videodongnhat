@@ -1,11 +1,19 @@
-import React, { useState } from 'react';
-import { VeoProject, VideoStyle, AspectRatio, SceneCount } from './types';
+import React, { useState, useEffect } from 'react';
+import { VeoProject, VideoStyle, AspectRatio, SceneCount, UserProfile } from './types';
 import { generateSceneJson } from './services/geminiService';
 import InputSection from './components/InputSection';
 import JsonViewer from './components/JsonViewer';
-import { Terminal } from 'lucide-react';
+import Login from './components/Login';
+import AdminTools from './components/AdminTools';
+import { Terminal, LogOut, Shield, User as UserIcon, Settings, Lock } from 'lucide-react';
 
 const App: React.FC = () => {
+  // Auth State (Custom Realtime DB Auth)
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [showAdminTools, setShowAdminTools] = useState(false);
+
+  // App State
   const [scriptInput, setScriptInput] = useState<string>('');
   const [generatedData, setGeneratedData] = useState<VeoProject | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -16,8 +24,42 @@ const App: React.FC = () => {
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
   const [sceneCount, setSceneCount] = useState<SceneCount>(1);
 
+  // Auth Effect: Check LocalStorage on Mount
+  useEffect(() => {
+    const storedUser = localStorage.getItem('veo_user');
+    if (storedUser) {
+      try {
+        const parsedUser = JSON.parse(storedUser);
+        setUser(parsedUser);
+      } catch (e) {
+        console.error("Failed to parse user session", e);
+        localStorage.removeItem('veo_user');
+      }
+    }
+    setAuthLoading(false);
+  }, []);
+
+  const handleLoginSuccess = (loggedInUser: UserProfile) => {
+    setUser(loggedInUser);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('veo_user');
+    setUser(null);
+    setGeneratedData(null);
+    setScriptInput('');
+  };
+
   const handleGenerate = async () => {
     if (!scriptInput.trim()) return;
+
+    // --- ROLE CHECK ---
+    // Role 1 = Admin, Role 2 = Active User. Both allowed.
+    // Role 0 = New/Pending. Not allowed.
+    if (!user || user.role === 0) {
+      setError("Tài khoản chưa được kích hoạt. Vui lòng liên hệ Admin để cấp quyền.");
+      return;
+    }
     
     setIsLoading(true);
     setError(null);
@@ -32,6 +74,32 @@ const App: React.FC = () => {
     }
   };
 
+  // 1. Show Loading Screen while checking LocalStorage
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center space-y-4">
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-slate-500 text-sm font-mono animate-pulse">Checking session...</p>
+      </div>
+    );
+  }
+
+  // 2. Show Login Screen if not logged in
+  if (!user) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // Helper to get role label
+  const getRoleLabel = (role: number) => {
+    if (role === 1) return { label: 'Admin', color: 'text-emerald-400', icon: Shield };
+    if (role === 2) return { label: 'Member', color: 'text-blue-400', icon: UserIcon };
+    return { label: 'Pending', color: 'text-slate-400', icon: Lock };
+  };
+
+  const roleInfo = getRoleLabel(user.role);
+  const RoleIcon = roleInfo.icon;
+
+  // 3. Main App UI
   return (
     <div className="min-h-screen flex flex-col bg-slate-950 text-slate-200 selection:bg-blue-500/30 selection:text-blue-200">
       {/* Header */}
@@ -46,8 +114,39 @@ const App: React.FC = () => {
               <p className="text-xs text-blue-400 font-medium tracking-wide">AI VIDEO SCRIPT ANALYZER</p>
             </div>
           </div>
-          <div className="flex items-center space-x-4">
-            <span className="text-xs font-mono text-slate-500 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">v2.0.0</span>
+          
+          <div className="flex items-center space-x-3 md:space-x-4">
+            {/* User Info & Role Badge */}
+            <div className="hidden sm:flex items-center space-x-3 bg-slate-900 py-1.5 px-3 rounded-full border border-slate-800">
+              <div className={`flex items-center space-x-1.5 ${roleInfo.color}`}>
+                <RoleIcon className="w-3.5 h-3.5" />
+                <span className="text-[10px] font-bold uppercase tracking-wider">{roleInfo.label}</span>
+              </div>
+              <div className="w-px h-3 bg-slate-700 mx-1"></div>
+              <div className="flex flex-col items-end leading-none">
+                 <span className="text-xs font-semibold text-slate-200">{user.name}</span>
+                 <span className="text-[10px] font-mono text-slate-500 truncate max-w-[150px]">{user.email}</span>
+              </div>
+            </div>
+
+            {/* Admin Tools Button (Only if Role = 1) */}
+            {user.role === 1 && (
+              <button 
+                onClick={() => setShowAdminTools(true)}
+                className="hidden md:flex items-center gap-2 text-xs bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 px-3 py-1.5 rounded-full transition-all"
+              >
+                <Settings className="w-3.5 h-3.5" />
+                <span>Admin Panel</span>
+              </button>
+            )}
+
+            <button 
+              onClick={handleLogout}
+              className="p-2 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition-colors"
+              title="Logout"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
           </div>
         </div>
       </header>
@@ -84,11 +183,17 @@ const App: React.FC = () => {
       <footer className="border-t border-slate-800 py-4 bg-slate-950">
         <div className="max-w-7xl mx-auto px-4 flex flex-col md:flex-row justify-between items-center text-xs text-slate-500">
           <p>Sản phẩm của Quang Nhân</p>
-          <div className="mt-2 md:mt-0 flex space-x-4">
+          <div className="mt-2 md:mt-0 flex space-x-4 items-center">
              <span>Strict JSON Array Schema</span>
+             {user.role === 1 && <span className="text-emerald-500 font-mono">[ADMIN MODE ACTIVE]</span>}
           </div>
         </div>
       </footer>
+
+      {/* Admin Modal */}
+      {showAdminTools && (
+        <AdminTools onClose={() => setShowAdminTools(false)} />
+      )}
     </div>
   );
 };
