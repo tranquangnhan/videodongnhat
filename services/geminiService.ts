@@ -141,8 +141,11 @@ const PROJECT_SCHEMA: Schema = {
   items: SCENE_SCHEMA,
 };
 
-// Helper function for delay
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// Helper function for delay with jitter
+const wait = (ms: number) => {
+  const jitter = Math.random() * 1000; // Add up to 1s of randomness
+  return new Promise((resolve) => setTimeout(resolve, ms + jitter));
+};
 
 export const generateSceneJson = async (
   scriptText: string,
@@ -158,104 +161,89 @@ export const generateSceneJson = async (
 
   const stylePrompts = {
     single: "Create a single, highly detailed scene.",
-    animation: "Render Style must be '3D Animation' or 'Anime'. Colors should be vibrant.",
-    cinematic: "Render Style must be 'Photorealistic Cinematic'. Focus on filmic lighting and anamorphic lenses.",
-    tiktok: "Optimized for vertical viewing. Fast paced, engaging visuals."
+    animation: "Style: 3D Animation/Anime. Vibrant colors.",
+    cinematic: "Style: Photorealistic Cinematic. Film lighting.",
+    tiktok: "Style: Fast-paced vertical viral video."
   };
 
   const systemInstruction = `
-    Bạn là chuyên gia chuyển đổi kịch bản video sang JSON cho Veo AI.
+    Bạn là chuyên gia phân tích kịch bản video cho Veo AI.
     
-    **CẤU HÌNH YÊU CẦU:**
-    - Phong cách (Style): ${style} (${stylePrompts[style]})
-    - Tỉ lệ khung hình (Aspect Ratio): ${aspectRatio} (Bắt buộc áp dụng cho TẤT CẢ các cảnh).
-    - Số lượng cảnh yêu cầu: ${sceneCount} cảnh.
-    - Tổng thời lượng ước tính: ${sceneCount === 1 ? '10-20s' : `${sceneCount * 8}s`}.
+    Yêu cầu:
+    - Style: ${style} (${stylePrompts[style]})
+    - Ratio: ${aspectRatio}
+    - Count: ${sceneCount} cảnh.
 
-    **NHIỆM VỤ QUAN TRỌNG VỀ NGÔN NGỮ & NHẤT QUÁN (CONSISTENCY):**
-    
-    1. **PHẦN HÌNH ẢNH (Core Description - Subject):**
-       - Dịch sang TIẾNG ANH.
-       - **BẮT BUỘC: MÔ TẢ TRANG PHỤC (CLOTHING/OUTFIT) ĐỒNG NHẤT.**
-       - Nếu kịch bản không tả quần áo, bạn PHẢI TỰ SÁNG TẠO ra một bộ trang phục chi tiết (Ví dụ: "wearing a white linen shirt and navy blue trousers") ở cảnh đầu tiên.
-       - **CÁC CẢNH SAU PHẢI GIỮ NGUYÊN MÔ TẢ TRANG PHỤC NÀY** (Copy & Paste mô tả trang phục từ cảnh 1 sang các cảnh sau, trừ khi kịch bản có cảnh thay đồ). Không được để nhân vật mỗi cảnh mặc một bộ đồ khác nhau.
-
-    2. **PHẦN ÂM THANH/THOẠI (Audio Design - Dialogue):**
-       - **Text (Lời thoại):** BẮT BUỘC GIỮ NGUYÊN TIẾNG VIỆT như kịch bản gốc. TUYỆT ĐỐI KHÔNG DỊCH lời thoại sang tiếng Anh.
-       - **Speaker (Tên nhân vật):** Giữ nguyên tên Tiếng Việt (Ví dụ: Tùng, Lan...).
-       - **Voice Profile (Mô tả giọng):** Có thể dùng tiếng Anh nhưng phải ghi chú "Vietnamese language" hoặc "Vietnamese accent".
-
-    **QUY TRÌNH XỬ LÝ:**
-    1. Phân tích kịch bản và chia thành đúng ${sceneCount} cảnh.
-    2. Xác định ngoại hình và trang phục nhân vật chính (Subject) thật chi tiết.
-    3. Tạo dữ liệu cho cảnh 1.
-    4. Tạo dữ liệu cho các cảnh tiếp theo, đảm bảo mô tả Subject (bao gồm trang phục) khớp với cảnh 1.
-    5. Tính toán thời gian (start_time, end_time) liên tục.
+    Lưu ý quan trọng:
+    1. Hình ảnh: Dịch mô tả sang tiếng Anh. Phải tả trang phục (clothing) chi tiết và GIỮ ĐỒNG NHẤT (Consistency) giữa tất cả các cảnh.
+    2. Thoại: GIỮ NGUYÊN TIẾNG VIỆT 100%. Không dịch phần text thoại.
+    3. Speaker: Giữ tên gốc tiếng Việt.
   `;
 
-  // Retry logic configuration
-  const MAX_RETRIES = 3;
+  // Increased retries for better stability
+  const MAX_RETRIES = 6;
   let lastError: any;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-3-flash-preview", // Upgraded model
         contents: scriptText,
         config: {
           systemInstruction: systemInstruction,
           responseMimeType: "application/json",
           responseSchema: PROJECT_SCHEMA,
-          temperature: 0.3, 
+          temperature: 0.2, // Lower temperature for more stable JSON
         },
       });
 
-      const text = response.text;
-      if (!text) {
-        throw new Error("No response from AI");
+      if (!response.text) {
+        throw new Error("Empty response from AI");
       }
 
-      return JSON.parse(text) as VeoProject;
+      return JSON.parse(response.text.trim()) as VeoProject;
 
     } catch (error: any) {
-      console.warn(`Gemini API Attempt ${attempt + 1} failed:`, error);
+      console.warn(`Attempt ${attempt + 1} failed:`, error.message);
       lastError = error;
 
-      // Check if error is related to quota/overload (429 Too Many Requests or 503 Service Unavailable)
-      const isOverloaded = 
-        error.message?.includes('429') || 
-        error.status === 429 || 
-        error.message?.includes('quota') ||
-        error.message?.includes('Resource has been exhausted') ||
+      // Robust rate limit detection
+      const errorMsg = (error.message || "").toLowerCase();
+      const isRateLimited = 
+        errorMsg.includes('429') || 
+        errorMsg.includes('quota') || 
+        errorMsg.includes('exhausted') || 
+        errorMsg.includes('limit') ||
+        errorMsg.includes('overload') ||
+        error.status === 429 ||
         error.status === 503;
 
-      // If it's a transient overload error and we haven't exhausted retries
-      if (isOverloaded && attempt < MAX_RETRIES - 1) {
-        // Exponential backoff: 2s, 4s, 8s
-        const delayTime = 2000 * Math.pow(2, attempt);
-        console.log(`System overloaded. Retrying in ${delayTime}ms...`);
-        await wait(delayTime);
+      if (isRateLimited && attempt < MAX_RETRIES - 1) {
+        // Progressive backoff: 3s, 6s, 12s, 24s, 48s...
+        const backoffMs = 3000 * Math.pow(2, attempt);
+        console.log(`Rate limited. Waiting ${backoffMs}ms before retry...`);
+        await wait(backoffMs);
         continue;
       }
 
-      // If it's another error type or we ran out of retries, stop loop
+      // If it's a structural error (not rate limit), don't bother retrying as much
+      if (!isRateLimited && attempt < 1) {
+        await wait(1000);
+        continue;
+      }
+
       break;
     }
   }
 
-  // If we reach here, all attempts failed
+  // Final error handling with clear message
   if (lastError) {
-    const isOverloaded = 
-      lastError.message?.includes('429') || 
-      lastError.status === 429 || 
-      lastError.message?.includes('quota') ||
-      lastError.message?.includes('Resource has been exhausted');
-
-    if (isOverloaded) {
-      throw new Error("Hệ thống AI đang quá tải (API Rate Limit). Vui lòng đợi khoảng 1 phút và thử lại.");
+    const errorMsg = (lastError.message || "").toLowerCase();
+    if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('limit')) {
+      throw new Error("Hệ thống AI đang nhận quá nhiều yêu cầu cùng lúc. Vui lòng đợi 30-60 giây và thử lại.");
     }
-    throw lastError;
+    throw new Error(`Lỗi AI: ${lastError.message || "Không xác định"}`);
   }
 
-  throw new Error("Unknown error occurred during generation.");
+  throw new Error("Không thể tạo JSON sau nhiều lần thử.");
 };
