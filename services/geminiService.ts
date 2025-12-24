@@ -1,23 +1,51 @@
+
 import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { VeoProject, VideoStyle, AspectRatio, SceneCount } from "../types";
+
+const VOICE_PROFILE_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    voice_id: { type: Type.STRING },
+    gender: { type: Type.STRING },
+    language: { type: Type.STRING },
+    style: { type: Type.STRING },
+    tone: { type: Type.STRING },
+    emotion: { type: Type.STRING },
+    age_range: { type: Type.STRING },
+    stability: { type: Type.NUMBER },
+    clarity: { type: Type.NUMBER },
+    pitch: { type: Type.NUMBER },
+    speed: { type: Type.NUMBER },
+    pause_between_sentences_ms: { type: Type.NUMBER },
+    breathing: { type: Type.STRING },
+    sample_rate: { type: Type.NUMBER },
+    consistency_lock: { type: Type.BOOLEAN },
+  },
+  required: [
+    "voice_id", "gender", "language", "style", "tone", "emotion", 
+    "age_range", "stability", "clarity", "pitch", "speed", 
+    "pause_between_sentences_ms", "breathing", "sample_rate", "consistency_lock"
+  ],
+};
 
 const SCENE_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {
-    veo_prompt_standard: { type: Type.STRING, description: "Version standard, e.g., 3.1" },
+    scene_id: { type: Type.INTEGER },
+    veo_prompt_standard: { type: Type.STRING },
     metadata: {
       type: Type.OBJECT,
       properties: {
         project_name: { type: Type.STRING },
-        scene_number: { type: Type.STRING, description: "SCENE_01, SCENE_02, etc." },
+        scene_number: { type: Type.STRING },
         shot_type: { type: Type.STRING },
         purpose: { type: Type.STRING },
         timing: {
           type: Type.OBJECT,
           properties: {
-            start_time: { type: Type.STRING, description: "Format 00:00:00" },
-            end_time: { type: Type.STRING, description: "Format 00:00:00" },
-            duration_seconds: { type: Type.NUMBER, description: "Duration in seconds" }
+            start_time: { type: Type.STRING },
+            end_time: { type: Type.STRING },
+            duration_seconds: { type: Type.NUMBER }
           },
           required: ["start_time", "end_time", "duration_seconds"]
         }
@@ -27,9 +55,12 @@ const SCENE_SCHEMA: Schema = {
     core_description: {
       type: Type.OBJECT,
       properties: {
-        subject: { type: Type.STRING, description: "English description of subject. MUST INCLUDE SPECIFIC CLOTHING DETAILS that remain consistent." },
-        action: { type: Type.STRING, description: "English description of action" },
-        scene: { type: Type.STRING, description: "English description of scene" },
+        subject: { 
+          type: Type.STRING,
+          description: "Detailed character design including: Gender, Age, Race, Skin, Hair (color/style), Eyes, Expression, and Distinguishing features."
+        },
+        action: { type: Type.STRING },
+        scene: { type: Type.STRING },
         cinematic_elements: {
           type: Type.OBJECT,
           properties: {
@@ -86,9 +117,9 @@ const SCENE_SCHEMA: Schema = {
               type: Type.OBJECT,
               properties: {
                 mode: { type: Type.STRING },
-                speaker: { type: Type.STRING, description: "Original Vietnamese name" },
-                text: { type: Type.STRING, description: "MUST BE IN VIETNAMESE. Do not translate dialogue." },
-                voice_profile: { type: Type.STRING },
+                speaker: { type: Type.STRING },
+                text: { type: Type.STRING },
+                voice_profile: VOICE_PROFILE_SCHEMA,
                 delivery: { type: Type.STRING },
               },
               required: ["mode", "speaker", "text", "voice_profile", "delivery"],
@@ -126,24 +157,33 @@ const SCENE_SCHEMA: Schema = {
     },
   },
   required: [
-    "veo_prompt_standard",
-    "metadata",
-    "core_description",
-    "motion_specifications",
-    "audio_design",
-    "technical_parameters",
-    "quality_control",
+    "scene_id", "veo_prompt_standard", "metadata", "core_description", 
+    "motion_specifications", "audio_design", "technical_parameters", "quality_control"
   ],
 };
 
 const PROJECT_SCHEMA: Schema = {
-  type: Type.ARRAY,
-  items: SCENE_SCHEMA,
+  type: Type.OBJECT,
+  properties: {
+    story: {
+      type: Type.OBJECT,
+      properties: {
+        title: { type: Type.STRING },
+        total_duration_seconds: { type: Type.NUMBER },
+        voice_mode: { type: Type.STRING },
+        scenes: {
+          type: Type.ARRAY,
+          items: SCENE_SCHEMA,
+        },
+      },
+      required: ["title", "total_duration_seconds", "voice_mode", "scenes"],
+    },
+  },
+  required: ["story"],
 };
 
-// Helper function for delay with jitter
 const wait = (ms: number) => {
-  const jitter = Math.random() * 1000; // Add up to 1s of randomness
+  const jitter = Math.random() * 1000;
   return new Promise((resolve) => setTimeout(resolve, ms + jitter));
 };
 
@@ -159,91 +199,70 @@ export const generateSceneJson = async (
 
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-  const stylePrompts = {
-    single: "Create a single, highly detailed scene.",
-    animation: "Style: 3D Animation/Anime. Vibrant colors.",
-    cinematic: "Style: Photorealistic Cinematic. Film lighting.",
-    tiktok: "Style: Fast-paced vertical viral video."
-  };
-
   const systemInstruction = `
     Bạn là chuyên gia phân tích kịch bản video cho Veo AI.
     
-    Yêu cầu:
-    - Style: ${style} (${stylePrompts[style]})
-    - Ratio: ${aspectRatio}
-    - Count: ${sceneCount} cảnh.
+    YÊU CẦU CẤU TRÚC JSON:
+    - Root object: { "story": { "title": "...", "total_duration_seconds": ..., "voice_mode": "single_voice_over", "scenes": [...] } }
 
-    Lưu ý quan trọng:
+    THIẾT KẾ NHÂN VẬT & SUBJECT (QUAN TRỌNG):
+    Khi điền trường "core_description.subject", bạn PHẢI TỰ ĐỘNG phân tích và viết mô tả chi tiết nhân vật bằng TIẾNG ANH, bao gồm các thông số sau:
+    1. Gender (Giới tính)
+    2. Estimated Age (Tuổi)
+    3. Race / Face style (Chủng tộc/Khuôn mặt)
+    4. Skin color (Màu da)
+    5. Hair: color, length, style (Tóc)
+    6. Eyes: color, shape (Mắt)
+    7. Default expression (Biểu cảm)
+    8. Distinguishing features (Đặc điểm nhận dạng: sẹo, kính, nốt ruồi...)
+    
+    Ví dụ cho subject: "A 25-year-old Vietnamese man, sharp jawline, tanned skin, short messy black hair, narrow brown eyes, determined expression, wearing a white t-shirt..."
+
+    QUY TẮC NỘI DUNG:
     1. Hình ảnh: Dịch mô tả sang tiếng Anh. Phải tả trang phục (clothing) chi tiết và GIỮ ĐỒNG NHẤT (Consistency) giữa tất cả các cảnh.
     2. Thoại: GIỮ NGUYÊN TIẾNG VIỆT 100%. Không dịch phần text thoại.
-    3. Speaker: Giữ tên gốc tiếng Việt.
+    3. Voice Consistency Lock: Nếu là câu chuyện liên mạch, set "consistency_lock": true và dùng cùng "voice_id".
+    
+    Style: ${style}, Ratio: ${aspectRatio}, Count: ${sceneCount} scenes.
   `;
 
-  // Increased retries for better stability
   const MAX_RETRIES = 6;
   let lastError: any;
 
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview", // Upgraded model
+        model: "gemini-3-flash-preview",
         contents: scriptText,
         config: {
           systemInstruction: systemInstruction,
           responseMimeType: "application/json",
           responseSchema: PROJECT_SCHEMA,
-          temperature: 0.2, // Lower temperature for more stable JSON
+          temperature: 0.2,
         },
       });
 
-      if (!response.text) {
-        throw new Error("Empty response from AI");
-      }
-
+      if (!response.text) throw new Error("Empty response");
       return JSON.parse(response.text.trim()) as VeoProject;
 
     } catch (error: any) {
       console.warn(`Attempt ${attempt + 1} failed:`, error.message);
       lastError = error;
-
-      // Robust rate limit detection
       const errorMsg = (error.message || "").toLowerCase();
-      const isRateLimited = 
-        errorMsg.includes('429') || 
-        errorMsg.includes('quota') || 
-        errorMsg.includes('exhausted') || 
-        errorMsg.includes('limit') ||
-        errorMsg.includes('overload') ||
-        error.status === 429 ||
-        error.status === 503;
+      const isRateLimited = errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('exhausted') || error.status === 429;
 
       if (isRateLimited && attempt < MAX_RETRIES - 1) {
-        // Progressive backoff: 3s, 6s, 12s, 24s, 48s...
         const backoffMs = 3000 * Math.pow(2, attempt);
-        console.log(`Rate limited. Waiting ${backoffMs}ms before retry...`);
         await wait(backoffMs);
         continue;
       }
-
-      // If it's a structural error (not rate limit), don't bother retrying as much
-      if (!isRateLimited && attempt < 1) {
-        await wait(1000);
-        continue;
-      }
-
       break;
     }
   }
 
-  // Final error handling with clear message
   if (lastError) {
-    const errorMsg = (lastError.message || "").toLowerCase();
-    if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('limit')) {
-      throw new Error("Hệ thống AI đang nhận quá nhiều yêu cầu cùng lúc. Vui lòng đợi 30-60 giây và thử lại.");
-    }
-    throw new Error(`Lỗi AI: ${lastError.message || "Không xác định"}`);
+    throw new Error(`Lỗi hệ thống: ${lastError.message}`);
   }
 
-  throw new Error("Không thể tạo JSON sau nhiều lần thử.");
+  throw new Error("Không thể tạo dữ liệu.");
 };

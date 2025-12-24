@@ -1,4 +1,22 @@
 
+export interface VoiceProfile {
+  voice_id: string;
+  gender: string;
+  language: string;
+  style: string;
+  tone: string;
+  emotion: string;
+  age_range: string;
+  stability: number;
+  clarity: number;
+  pitch: number;
+  speed: number;
+  pause_between_sentences_ms: number;
+  breathing: string;
+  sample_rate: number;
+  consistency_lock: boolean;
+}
+
 export interface VeoMetadata {
   project_name: string;
   scene_number: string;
@@ -51,7 +69,7 @@ export interface DialogueSpecs {
   mode: string;
   speaker: string;
   text: string;
-  voice_profile: string;
+  voice_profile: VoiceProfile;
   delivery: string;
 }
 
@@ -83,6 +101,7 @@ export interface QualityControl {
 }
 
 export interface VeoSceneJson {
+  scene_id: number;
   veo_prompt_standard: string;
   metadata: VeoMetadata;
   core_description: CoreDescription;
@@ -92,18 +111,23 @@ export interface VeoSceneJson {
   quality_control: QualityControl;
 }
 
-export type VeoProject = VeoSceneJson[];
+export interface VeoProject {
+  story: {
+    title: string;
+    total_duration_seconds: number;
+    voice_mode: string;
+    scenes: VeoSceneJson[];
+  };
+}
 
 export type VideoStyle = 'single' | 'animation' | 'cinematic' | 'tiktok';
 export type AspectRatio = '16:9' | '9:16' | '21:9' | '4:3';
 export type SceneCount = 1 | 5 | 10 | 15;
 
-// Custom Auth User Profile
-// role: 1 = Admin, 2 = User (Active), 0 = Pending/New
 export interface UserProfile {
   id: string;
   email: string;
-  password?: string; // Storing password for manual auth check
+  password?: string;
   name: string;
   role: number;
   createdAt: number;
